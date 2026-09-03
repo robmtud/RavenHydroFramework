@@ -79,7 +79,7 @@ PYBIND11_MODULE(ravenbmi_pycore, m) {
         // instead it allocates new memory on the heap and returns a pointer to that.
         // Python needs to take ownership and free the memory.
         return py::array_t<double>(
-          { static_cast<ssize_t>(num_elements) },  // shape
+          { static_cast<size_t>(num_elements) },  // shape
           { sizeof(double) },                      // strides
           data,                                    // data pointer
           py::capsule(data, [](void *p) { delete[] static_cast<double *>(p); }));
@@ -91,7 +91,7 @@ PYBIND11_MODULE(ravenbmi_pycore, m) {
     cl.def("GetValueAtIndices",
       [](CRavenBMI &r, std::string name, py_array_cont<double> dest, py_array_cont<int> inds) -> py_array_cont<double> {
         int grid_size = r.GetGridSize(r.GetVarGrid(name));
-        ssize_t num_elements = inds.size();
+        size_t num_elements = inds.size();
         if (num_elements != dest.size()) {
           throw std::runtime_error("Size of output array (" + std::to_string(dest.size()) + ") does not match"
             +" size of index array (" + std::to_string(num_elements) + ")."
@@ -99,7 +99,7 @@ PYBIND11_MODULE(ravenbmi_pycore, m) {
         }
         const int *const ind_data = inds.data();
         // bound check supplied index values
-        for (ssize_t i = 0; i < num_elements; i++) {
+        for (size_t i = 0; i < num_elements; i++) {
           int p = ind_data[i];
           if (p < 0 || p >= grid_size) {
             throw std::out_of_range("Index " + std::to_string(i) + " has value " + std::to_string(p)
@@ -134,7 +134,7 @@ PYBIND11_MODULE(ravenbmi_pycore, m) {
     cl.def("SetValueAtIndices",
       [](CRavenBMI &r, std::string name, py_array_cont<int> inds, py_array_cont<double> src) {
         int grid_size = r.GetGridSize(r.GetVarGrid(name));
-        ssize_t num_elements = inds.size();
+        size_t num_elements = inds.size();
         if (num_elements != src.size()) {
           throw std::runtime_error("Size of source array (" + std::to_string(src.size()) + ") does not match"
             +" size of index array (" + std::to_string(num_elements) + ")."
@@ -142,7 +142,7 @@ PYBIND11_MODULE(ravenbmi_pycore, m) {
         }
         const int *const ind_data = inds.data();
         // bound check supplied index values
-        for (ssize_t i = 0; i < num_elements; i++) {
+        for (size_t i = 0; i < num_elements; i++) {
           int p = ind_data[i];
           if (p < 0 || p >= grid_size) {
             throw std::out_of_range("Index " + std::to_string(i) + " has value " + std::to_string(p)
