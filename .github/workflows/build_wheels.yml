@@ -9,22 +9,101 @@ jobs:
     strategy:
       matrix:
         # macos-15-intel is an Intel runner, macos-14 is Apple silicon
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-14]
+        #os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-14]
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
+      # ─── macOS (Intel & Apple Silicon) ───
+      - name: Install NetCDF (macOS)
+        if: runner.os == 'macOS'
+        run: brew install netcdf
+
+      - name: Cache vcpkg
+        if: runner.os == 'Windows'
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vcpkg/installed
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-2026.07.29-netcdf-c
+
+      # ─── Windows (x64 & ARM64) ───
+      - name: Install NetCDF (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        #run: |
+          #git clone https://github.com/microsoft/vcpkg.git
+          #.\vcpkg\bootstrap-vcpkg.bat
+          #$triplet = if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x64-windows" } else { "arm64-windows" }
+          #.\vcpkg\vcpkg.exe install "netcdf-c" --triplet $triplet
+        #run: |
+          #git clone https://github.com/microsoft/vcpkg.git
+          #.\vcpkg\bootstrap-vcpkg.bat
+          #.\vcpkg\vcpkg.exe install "netcdf-c"
+        run: |
+          $VCPKG_REF = "2026.07.29"
+
+          if (-not (Test-Path "vcpkg\vcpkg.exe")) {
+            git clone --depth 1 --branch $VCPKG_REF https://github.com/microsoft/vcpkg.git
+            .\vcpkg\bootstrap-vcpkg.bat
+          }
+
+          $triplet = if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x64-windows" } else { "arm64-windows" }
+
+          if ("${{ steps.vcpkg-cache.outputs.cache-hit }}" -ne "true") {
+            .\vcpkg\vcpkg.exe install "netcdf-c" --triplet $triplet
+          }
+
+          # Create a junction so CMake's glob search (netcdf*) matches the directory
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "vcpkg\installed\$triplet"
+          $target = Join-Path $prefix "share\netcdf-c"
+          $link   = Join-Path $prefix "share\netcdf"
+          if (-not (Test-Path $link)) {
+            New-Item -ItemType Junction -Path $link -Target $target | Out-Null
+          }
+
+      #- name: Install NetCDF (Windows)
+        #if: runner.os == 'Windows'
+        #shell: pwsh
+        #run: |
+          #$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x86_64" } else { "arm64" }
+          #$triplet = if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x64" } else { "arm64" }
+          #Invoke-WebRequest -Uri "https://github.com/microsoft/vcpkg/releases/latest/download/vcpkg-windows-${arch}.exe" -OutFile "vcpkg.exe"
+          #.\vcpkg.exe install "netcdf-c:${triplet}-windows" --triplet "${triplet}-windows"
+      - name: Verify NetCDF install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $triplet = if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x64-windows" } else { "arm64-windows" }
+          $installRoot = Join-Path $env:GITHUB_WORKSPACE "vcpkg\installed\$triplet"
+          Get-ChildItem -Path $installRoot -Recurse -Include "*.cmake","*.lib","netcdf.h" | Select-Object FullName
+
+      - name: Diagnostic - verify env reaches build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "GITHUB_WORKSPACE = $env:GITHUB_WORKSPACE"
+          Write-Host "CMAKE_PREFIX_PATH should be: $env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows"
+          $configFile = Join-Path $env:GITHUB_WORKSPACE "vcpkg\installed\x64-windows\share\netcdf\netCDFConfig.cmake"
+          Write-Host "Config file exists: $(Test-Path $configFile)"
+
+      # ─── Build wheels ───
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.2.0
-        # env:
-        #   CIBW_SOME_OPTION: value
-        #   ...
-        # with:
-        #   package-dir: .
-        #   output-dir: wheelhouse
-        #   config-file: "{package}/pyproject.toml"
+        env:
+          CIBW_BUILD: cp314-*
+          # Linux: runs inside the Docker container
+          CIBW_BEFORE_ALL_LINUX: yum install -y netcdf-devel
+          # Windows: point the compiler at vcpkg's installed libraries
+          #CIBW_ENVIRONMENT_WINDOWS: >
+            #CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+          CIBW_ENVIRONMENT_WINDOWS: >
+            CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=D:/a/RavenHydroFramework/RavenHydroFramework/vcpkg/scripts/buildsystems/vcpkg.cmake
+        with:
+          output-dir: wheelhouse
 
       - uses: actions/upload-artifact@v4
         with:
