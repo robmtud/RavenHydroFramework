@@ -10,23 +10,113 @@ jobs:
       matrix:
         # macos-15-intel is an Intel runner, macos-14 is Apple silicon
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-14]
+        #os: [ubuntu-latest, windows-latest]
+        #os: [ubuntu-latest]
+        #os: [windows-latest]
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          disable-sudo: false
+          egress-policy: block
+          allowed-endpoints: >
+            azure.archive.ubuntu.com:80
+            esm.ubuntu.com:443
+            files.pythonhosted.org:443
+            github.com:443
+            motd.ubuntu.com:443
+            packages.microsoft.com:443
+            pypi.org:443
+            raw.githubusercontent.com port:443
+
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
+      # ─── macOS (Intel & Apple Silicon) ───
+      #- name: Install NetCDF (macOS)
+        #if: runner.os == 'macOS'
+        #run: brew install netcdf
+
+      - name: Install NetCDF4 (macOS/homebrew)
+        if: ${{ contains(matrix.os, 'macos') }}
+        uses: tecolicom/actions-use-homebrew-tools@b9c066b79607fa3d71e0be05d7003bb75fd9ff34 # v1.3.0
+        with:
+          tools: netcdf
+          cache: "yes"
+
+      - name: Restore vcpkg cache (Windows)
+        if: runner.os == 'Windows'
+        id: vcpkg-cache-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: vcpkg
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-2026.07.29-netcdf-c
+
+      # ─── Windows (x64 & ARM64) ───
+      - name: Install NetCDF (Windows)
+        if: runner.os == 'Windows' && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $VCPKG_REF = "2026.07.29"
+
+          git clone --depth 1 --branch $VCPKG_REF https://github.com/microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+
+          $triplet = if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x64-windows" } else { "arm64-windows" }
+
+          .\vcpkg\vcpkg.exe install "netcdf-c" --triplet $triplet
+
+      - name: Save vcpkg cache (Windows)
+        if: runner.os == 'Windows' && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
+        id: vcpkg-cache-save
+        uses: actions/cache/save@v6
+        with:
+          path: vcpkg
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-2026.07.29-netcdf-c
+
+      - name: Verify NetCDF install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $triplet = if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x64-windows" } else { "arm64-windows" }
+          $installRoot = Join-Path $env:GITHUB_WORKSPACE "vcpkg\installed\$triplet"
+          Get-ChildItem -Path $installRoot -Recurse -Include "*.cmake","*.lib","netcdf.h","*.dll" | Select-Object FullName
+
+      - name: Fetch NetCDF CMake find_package script
+        shell: bash
+        run: |
+          curl -kLSs https://raw.githubusercontent.com/Kitware/VTK/master/CMake/FindNetCDF.cmake -O --create-dirs --output-dir cmake
+
+      - name: Set macOS deployment target
+        if: ${{ contains(matrix.os, 'macos') }}
+        run: echo "MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d '.' -f 1-2)" >> $GITHUB_ENV
+
+      # ─── Build wheels ───
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.2.0
-        # env:
-        #   CIBW_SOME_OPTION: value
-        #   ...
-        # with:
-        #   package-dir: .
-        #   output-dir: wheelhouse
-        #   config-file: "{package}/pyproject.toml"
+        env:
+          CIBW_BUILD: "cp313-* cp314-* cp315-*"
+          CIBW_SKIP: '*-win32 *musl*'
 
-      - uses: actions/upload-artifact@v4
+          CIBW_BEFORE_ALL_LINUX: yum install -y netcdf-devel
+
+          CIBW_ENVIRONMENT_WINDOWS: >
+            CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
+
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
+            delvewheel repair
+            -v
+            --add-path=${{ github.workspace }}\vcpkg\installed\${{ runner.arch == 'ARM64' && 'arm64-windows' || 'x64-windows' }}\bin
+            --no-dll=vcruntime140.dll
+            --wheel-dir={dest_dir}
+            {wheel}
+
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          output-dir: wheelhouse
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: raven-bmi-sys-wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
