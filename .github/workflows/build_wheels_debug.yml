@@ -1,0 +1,54 @@
+name: Build wheels
+
+on: [workflow_call]
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # macos-15-intel is an Intel runner, macos-14 is Apple silicon
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-14]
+        #os: [ubuntu-latest, windows-latest]
+        #os: [ubuntu-24.04-arm]
+        #os: [windows-latest]
+
+    steps:
+
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          ls
+          python --version
+          echo wheel_version=$(sed -nEe 's/__version__ *= *["'"'](.*)['"'"]/\1/p' python/raven_bmi_sys/__init__.py) >> "$GITHUB_OUTPUT"
+
+      # ─── Build wheels ───
+      - name: Build wheels
+        env:
+          MATOS: ${{ matrix.os }}
+          WHEEL_VERSION: ${{ steps.version.outputs.wheel_version }}
+        shell: bash
+        run: |
+          mkdir wheelhouse
+          for v in 313 314 315; do
+            echo "DEBUG" > wheelhouse/raven_bmi_sys-${WHEEL_VERSION}-cp${v}-cp${v}-${MATOS}.whl
+          done
+          cd wheelhouse
+          #tar czvf raven_bmi_sys_wheels-${WHEEL_VERSION}-${MATOS}.tar.gz *.whl
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            /c/Windows/System32/tar.exe --format zip -cf raven_bmi_sys_wheels-${WHEEL_VERSION}-${MATOS}.zip *.whl
+          else
+            zip raven_bmi_sys_wheels-${WHEEL_VERSION}-${MATOS}.zip *.whl
+          fi
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: raven_bmi_sys-${{ steps.version.outputs.wheel_version }}-${{ matrix.os }}
+          #path: ./wheelhouse/*.tar.gz
+          path: ./wheelhouse/*.zip
