@@ -1,6 +1,6 @@
 name: Build wheels
 
-on: [push, pull_request]
+on: [workflow_call]
 
 jobs:
   build_wheels:
@@ -11,7 +11,7 @@ jobs:
         # macos-15-intel is an Intel runner, macos-14 is Apple silicon
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-14]
         #os: [ubuntu-latest, windows-latest]
-        #os: [ubuntu-latest]
+        #os: [ubuntu-24.04-arm]
         #os: [windows-latest]
 
     steps:

@@ -1,0 +1,51 @@
+name: Publish wheels
+
+on: [push, pull_request]
+
+jobs:
+  build_wheels:
+    uses: ./.github/workflows/build_wheels.yml
+
+  publish:
+    name: Publish Developement Build
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "raven-bmi-sys-wheels-*"
+          merge-multiple: true
+
+      - name: Display structure of downloaded files
+        run: ls -R ./
+
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: "Latest Developement Build"
+          prerelease: true
+          makeLatest: false
+          allowUpdates: true
+          removeArtifacts: true
+          body: |
+            Automated developement build from `${{ github.sha }}`.
+
+            Not intended for production use - use official releases instead.
+
+            **Commit:** ${{ github.sha }}
+            **Built:** ${{ github.run_id }}
+          #artifacts: "raven-bmi-sys-wheels*,raven_bmi_sys_wheels*"
+          artifacts: "*"
+
+      - name: Summary
+        run: |
+          cat <<EOF >> $GITHUB_STEP_SUMMARY
+          # Developement Build Published! :package:
+
+          Latest artifacts uploaded to:
+           <https://github.com/robmtud/RavenHydroFramework/releases/tag/latest>
+
+          Built from commit: \`${{ github.sha }}\`
+          EOF
